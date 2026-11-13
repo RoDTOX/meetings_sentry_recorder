@@ -49,6 +49,13 @@ def out_dir() -> Path:
     return d
 
 
+def day_dir(day: str | None = None) -> Path:
+    """Recordings are grouped per day: <out_dir>/YYYY-MM-DD/."""
+    d = out_dir() / (day or datetime.now().strftime("%Y-%m-%d"))
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
 def jprint(obj) -> None:
     print(json.dumps(obj, indent=2, ensure_ascii=False))
 
@@ -224,7 +231,7 @@ def cmd_start(a) -> dict:
     region["h"] -= region["h"] % 2
     enc = pick_encoder(a.encoder)
     ext = a.format
-    out = a.out or str(out_dir() / f"rec_{datetime.now():%Y%m%d_%H%M%S}.{ext}")
+    out = a.out or str(day_dir() / f"rec_{datetime.now():%Y%m%d_%H%M%S}.{ext}")
     Path(out).parent.mkdir(parents=True, exist_ok=True)
 
     vf = [f"fps={a.fps}"]
@@ -443,7 +450,7 @@ def cmd_sentry_save(a) -> dict:
     if not segs:
         return {"ok": False, "error": "no buffered footage in that window (is sentry running?)"}
     offset = max(0.0, win_start - _seg_start(segs[0]))
-    out = a.out or str(out_dir() / f"sentry_{datetime.now():%Y%m%d_%H%M%S}.mp4")
+    out = a.out or str(day_dir() / f"sentry_{datetime.now():%Y%m%d_%H%M%S}.mp4")
     Path(out).parent.mkdir(parents=True, exist_ok=True)
     lst = Path(tempfile.gettempdir()) / "screenrec_sentry_concat.txt"
     lst.write_text("".join(f"file '{f.as_posix()}'\n" for f in segs))
@@ -481,7 +488,7 @@ def cmd_voice_start(a) -> dict:
     VOICE_FLAG.unlink(missing_ok=True)
     cfg = {"mode": a.mode, "hangover_s": a.hangover, "min_speech_s": a.min_speech, "fps": a.fps,
            "max_height": a.max_height, "target": a.target, "out_dir": str(out_dir()), "max_minutes": a.max_minutes,
-           "content": a.content}
+                      "content": a.content, "transcribe": a.transcribe, "language": a.language, "model": a.model}
     w = subprocess.Popen([sys.executable, os.path.abspath(__file__), "_voiceworker", json.dumps(cfg)],
                          creationflags=DETACHED, stdin=subprocess.DEVNULL,
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -537,7 +544,7 @@ def cmd_voice_status(_a) -> dict:
 
 def cmd_screenshot(a) -> dict:
     r = resolve_target(a.target)
-    out = a.out or str(out_dir() / f"shot_{datetime.now():%Y%m%d_%H%M%S}.png")
+    out = a.out or str(day_dir() / f"shot_{datetime.now():%Y%m%d_%H%M%S}.png")
     Path(out).parent.mkdir(parents=True, exist_ok=True)
     p = subprocess.run([ffmpeg_path(), "-hide_banner", "-loglevel", "error", "-y", *grab_args(r),
                         "-draw_mouse", "0", "-i", "desktop", "-frames:v", "1", out],
@@ -547,12 +554,34 @@ def cmd_screenshot(a) -> dict:
     return {"ok": True, **file_info(out), "region": r}
 
 
+def cmd_transcribe(a) -> dict:
+    import transcribe
+    return transcribe.transcribe_file(a.path, a.model or transcribe.DEFAULT_MODEL,
+                                      None if a.language == "auto" else a.language)
+
+
+def cmd_organize(_a) -> dict:
+    """Move loose rec_/call_/sentry_/shot_ files (and their .txt/.json) from the output root into YYYY-MM-DD folders."""
+    moved = 0
+    for p in out_dir().iterdir():
+        if p.is_file() and p.name.split("_")[0] in ("rec", "call", "sentry", "shot") and \
+                p.suffix in (".mp4", ".mkv", ".m4a", ".txt", ".json", ".png"):
+            dest = day_dir(datetime.fromtimestamp(p.stat().st_mtime).strftime("%Y-%m-%d")) / p.name
+            if not dest.exists():
+                p.rename(dest)
+                moved += 1
+    return {"ok": True, "moved": moved, "dir": str(out_dir())}
+
+
 def cmd_list(a) -> dict:
-    files = sorted([p for p in [*out_dir().glob("rec_*.*"), *out_dir().glob("call_*.*")]
+    root = out_dir()
+    files = sorted([p for p in [*root.glob("rec_*.*"), *root.glob("call_*.*"),
+                                *root.glob("*/rec_*.*"), *root.glob("*/call_*.*")]
                     if p.suffix in (".mp4", ".mkv", ".m4a")],
                    key=lambda p: p.stat().st_mtime, reverse=True)[: a.limit]
-    return {"dir": str(out_dir()), "recordings": [
-        {**file_info(str(p)), "modified": datetime.fromtimestamp(p.stat().st_mtime).isoformat(timespec="seconds")}
+    return {"dir": str(root), "recordings": [
+        {**file_info(str(p)), "modified": datetime.fromtimestamp(p.stat().st_mtime).isoformat(timespec="seconds"),
+         **({"transcript": str(p.with_suffix(".txt"))} if p.with_suffix(".txt").exists() else {})}
         for p in files]}
 
 
@@ -603,7 +632,18 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--max-minutes", type=int, default=240)
     s.add_argument("--content", choices=["audio", "audio+screen"], default="audio",
                    help="audio = only call_*.m4a (default); audio+screen also records call_*.mp4 at low fps")
+    s.add_argument("--no-transcribe", dest="transcribe", action="store_false",
+                   help="do not transcribe the call afterwards (default: transcribe to call_*.txt/.json)")
+    s.add_argument("--language", default="auto", help="auto | ro | en  (transcription language)")
+    s.add_argument("--model", default="", help="whisper model (default large-v3-turbo; faster: small/medium)")
     s.set_defaults(fn=cmd_voice_start)
+    s = sub.add_parser("transcribe", help="transcribe a call_*.m4a -> .txt + .json (offline, ro/en)")
+    s.add_argument("path")
+    s.add_argument("--language", default="auto")
+    s.add_argument("--model", default="")
+    s.set_defaults(fn=cmd_transcribe)
+    s = sub.add_parser("organize", help="move loose recordings in the output folder into per-day folders")
+    s.set_defaults(fn=cmd_organize)
     sub.add_parser("voice-stop").set_defaults(fn=cmd_voice_stop)
     sub.add_parser("voice-status").set_defaults(fn=cmd_voice_status)
     w = sub.add_parser("_voiceworker")

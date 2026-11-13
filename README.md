@@ -59,19 +59,26 @@ python screenrec.py sentry-stop
 
 30 s segments, old ones deleted automatically; export is a stream copy (instant). Cost: ~0.25 core and ~6 MB/min at 5 fps. Buffer in `%TEMP%\screenrec_sentry` (`SCREENREC_SENTRY_DIR`); it does not survive a reboot.
 
-## Voice watch (auto-record calls)
+## Voice watch (auto-record calls + transcript)
 
 ```powershell
-python screenrec.py voice-start [--content audio|audio+screen] [--mode conversation|any] [--hangover 90] [--min-speech 2]
+python screenrec.py voice-start [--content audio|audio+screen] [--mode conversation|any] [--hangover 90]
+                                [--min-speech 2] [--language auto|ro|en] [--no-transcribe] [--model large-v3-turbo]
 python screenrec.py voice-status
 python screenrec.py voice-stop
+python screenrec.py transcribe <call.m4a> [--language ro]     # also for old recordings
 ```
 
-- **`--content audio`** (default): only `call_*.m4a` — stereo 16 kHz, **left = you, right = others**, includes ~20 s *before* the trigger. Ready for Whisper & co (~8 MB / 17 min).
+- **`--content audio`** (default): only `call_*.m4a` — stereo 16 kHz, **left = you, right = others**, includes ~20 s *before* the trigger (~8 MB / 17 min).
 - **`--content audio+screen`**: also `call_*.mp4` (screen at 1 fps + audio).
+- **Transcript** (on by default): when a call ends, a low-priority background job transcribes it offline with faster-whisper (Romanian + English, language auto-detected per channel) into `call_*.txt` (`[00:12:03] You: ...` / `Others: ...`) and `call_*.json` (timestamped segments, for feeding another AI). Each channel is transcribed separately, so *You* vs *Others* needs no diarization; several people on the *Others* channel are not told apart. CPU only, one job at a time; the model (`large-v3-turbo`, ~1.6 GB) downloads on first use. Use `--model small|medium` for faster/lighter, `--language ro` if auto-detect mixes languages.
 - **`--mode conversation`** (default): needs speech on both sides within 20 s. `any`: either side (use if you stay muted in meetings).
 - Stops after `--hangover` seconds of silence (default 90) or `--max-minutes` (240).
 - Limits: without a headset the microphone hears the speakers, so one-sided audio can look like a conversation. Does not trigger while a manual recording runs.
+
+## Folders
+
+Everything is grouped per day: `~/Videos/2026-11-13/call_20261113_093012.m4a|.txt|.json`, `rec_*.mp4`, `shot_*.png` (override the root with `SCREENREC_DIR`). `python screenrec.py organize` moves older loose files into day folders; `list` searches all days and shows each recording's transcript path.
 
 ## MCP
 
@@ -81,7 +88,7 @@ claude mcp add screenrecorder -- python "<path>\mcp_server.py"
 
 Or in any MCP client: `{"command": "python", "args": ["<abs path>\\mcp_server.py"]}`.
 
-Tools: `screenrec_devices`, `screenrec_start`, `screenrec_stop`, `screenrec_status`, `screenrec_screenshot`, `screenrec_list`, `screenrec_sentry_start|save|status|stop`, `screenrec_voice_start|status|stop`.
+Tools: `screenrec_devices`, `screenrec_start`, `screenrec_stop`, `screenrec_status`, `screenrec_screenshot`, `screenrec_list`, `screenrec_sentry_start|save|status|stop`, `screenrec_voice_start|status|stop`, `screenrec_transcribe`, `screenrec_organize`.
 
 ## Files
 
@@ -90,6 +97,7 @@ Tools: `screenrec_devices`, `screenrec_start`, `screenrec_stop`, `screenrec_stat
 | `screenrec.py` | engine + CLI |
 | `audiocap.py` | audio sources that follow default devices |
 | `voicewatch.py` | speech-triggered call recorder |
+| `transcribe.py` | offline ro/en transcription of calls |
 | `mcp_server.py` | MCP wrapper |
 | `recgui.ps1`, `Recorder.bat/.vbs`, `launcher/` | tray GUI and windowless launcher |
 | `rec-cli.ps1` | simple console recorder |

@@ -76,14 +76,28 @@ def screenrec_screenshot(target: str = "all", out: str = "") -> dict:
 @mcp.tool(name="screenrec_voice_start")
 def screenrec_voice_start(mode: str = "conversation", hangover_s: int = 90, min_speech_s: float = 2.0,
                           fps: float = 1, max_height: int = 720, target: str = "all",
-                          content: str = "audio") -> dict:
+                          content: str = "audio", transcribe: bool = True, language: str = "auto") -> dict:
     """Start the voice watcher: listens to system sound (others) + microphone (you) with a speech detector
     (not plain loudness). On a real conversation it auto-records call_*.mp4 (audio + screen at ~1 fps) and
     call_*.m4a (stereo: left = you, right = others, includes ~20 s before the trigger) ready for transcription;
     stops after hangover_s of silence. mode 'conversation' needs speech on both sides; 'any' = either side."""
     return _run(sr.cmd_voice_start, _ns(mode=mode, hangover=hangover_s, min_speech=min_speech_s, fps=fps,
                                         max_height=max_height, target=target, max_minutes=240,
-                                        content=content))
+                                        content=content, transcribe=transcribe, language=language, model=""))
+
+
+@mcp.tool(name="screenrec_transcribe")
+def screenrec_transcribe(path: str, language: str = "auto") -> dict:
+    """Transcribe a call_*.m4a (offline, Romanian/English) into call_*.txt (readable, '[hh:mm:ss] You/Others: text')
+    and call_*.json (segments with timestamps) next to it. Slow on CPU (minutes) - voice watch already does this
+    automatically after each call; use this for old recordings. language: auto | ro | en."""
+    return _run(sr.cmd_transcribe, _ns(path=path, language=language, model=""))
+
+
+@mcp.tool(name="screenrec_organize")
+def screenrec_organize() -> dict:
+    """Move loose recordings in the output folder into per-day YYYY-MM-DD folders."""
+    return _run(sr.cmd_organize, None)
 
 
 @mcp.tool(name="screenrec_voice_status")

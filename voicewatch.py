@@ -60,6 +60,19 @@ def _open_audio_writer(out: str):
                             stdin=subprocess.PIPE, creationflags=NOWIN)
 
 
+def _spawn_transcription(m4a: str, cfg: dict) -> None:
+    """Detached, low-priority transcription so the call recording is never slowed down."""
+    import os
+    import sys
+    from screenrec import DETACHED
+    cmd = [sys.executable, str(Path(__file__).with_name("screenrec.py")), "transcribe", m4a,
+           "--language", cfg.get("language") or "auto"]
+    if cfg.get("model"):
+        cmd += ["--model", cfg["model"]]
+    subprocess.Popen(cmd, creationflags=DETACHED | 0x00004000, stdin=subprocess.DEVNULL,  # BELOW_NORMAL_PRIORITY
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
 def _close_audio_writer(w) -> None:
     try:
         w.stdin.close()
@@ -92,7 +105,10 @@ def run(cfg: dict, start_rec, stop_rec, rec_running, flag: Path) -> None:
         if writer:
             _close_audio_writer(writer)
         writer = None
-        meetings.append({"video": own_out, "audio": m4a, "duration_s": r.get("duration_s") or round(time.time() - rec_started)})
+        meetings.append({"video": own_out, "audio": m4a, "duration_s": r.get("duration_s") or round(time.time() - rec_started),
+                         "transcript": str(Path(m4a).with_suffix(".txt")) if cfg.get("transcribe", True) else None})
+        if cfg.get("transcribe", True) and m4a and Path(m4a).exists():
+            _spawn_transcription(m4a, cfg)
         recording = False
         for s in streams.values():  # old speech must not re-trigger a new recording
             s.hist.clear()
@@ -130,7 +146,9 @@ def run(cfg: dict, start_rec, stop_rec, rec_running, flag: Path) -> None:
             last_voice = now
 
         if not recording and triggered and not rec_running():
-            stem = Path(cfg["out_dir"]) / f"call_{time.strftime('%Y%m%d_%H%M%S')}"
+            day = Path(cfg["out_dir"]) / time.strftime("%Y-%m-%d")
+            day.mkdir(parents=True, exist_ok=True)
+            stem = day / f"call_{time.strftime('%Y%m%d_%H%M%S')}"
             m4a = str(stem.with_suffix(".m4a"))
             writer = _open_audio_writer(m4a)
             writer.stdin.write(b"".join(preroll))

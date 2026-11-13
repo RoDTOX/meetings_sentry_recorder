@@ -1,4 +1,5 @@
 numpy
 pyaudiowpatch
 webrtcvad-wheels
+faster-whisper
 mcp>=1.9

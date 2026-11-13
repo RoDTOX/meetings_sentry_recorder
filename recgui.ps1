@@ -140,8 +140,16 @@ $vModeMap = [ordered]@{ 'Conversation (you + others)' = 'conversation'; 'Any voi
 $vMode = Add-Combo 'Trigger' @($vModeMap.Keys) 'Conversation (you + others)'
 $vCntMap = [ordered]@{ 'Audio only (for transcripts)' = 'audio'; 'Audio + screen images (1 fps)' = 'audio+screen' }
 $vCnt = Add-Combo 'Record' @($vCntMap.Keys) 'Audio only (for transcripts)'
+$vTrMap = [ordered]@{ 'Transcribe after call (auto language)' = 'auto'; 'Transcribe - Romanian' = 'ro'; 'Transcribe - English' = 'en'; 'No transcript' = 'off' }
+$vTr = Add-Combo 'Transcript' @($vTrMap.Keys) 'Transcribe after call (auto language)'
 $vHang = Add-Combo 'Stop after silence' @('60 s', '90 s', '180 s', '300 s') '90 s'
-$vBtn = New-Object Windows.Forms.Button; $vBtn.Text = 'Start voice watch'; $vBtn.Location = "15,$y"; $vBtn.Size = '375,34'; $form.Controls.Add($vBtn)
+$vBtn = New-Object Windows.Forms.Button; $vBtn.Text = 'Start voice watch'; $vBtn.Location = "15,$y"; $vBtn.Size = '255,34'; $form.Controls.Add($vBtn)
+$vOpen = New-Object Windows.Forms.Button; $vOpen.Text = 'Open folder'; $vOpen.Location = "280,$y"; $vOpen.Size = '110,34'; $form.Controls.Add($vOpen)
+$vOpen.Add_Click({
+    $d = if ($env:SCREENREC_DIR) { $env:SCREENREC_DIR } else { Join-Path $env:USERPROFILE 'Videos' }
+    $day = Join-Path $d (Get-Date -Format 'yyyy-MM-dd')
+    Start-Process explorer.exe $(if (Test-Path $day) { $day } else { $d })
+})
 $form.ClientSize = "405,$($y + 55)"
 
 function Get-SentryInfo {
@@ -205,7 +213,10 @@ $vBtn.Add_Click({
     $form.Cursor = 'WaitCursor'; $vBtn.Enabled = $false
     if ((Get-VoiceInfo).On) { [void](Invoke-Cli @('voice-stop')) }
     else {
-        $r = Invoke-Cli @('voice-start', '--mode', $vModeMap[[string]$vMode.SelectedItem], '--hangover', (([string]$vHang.SelectedItem) -replace ' s', ''), '--content', $vCntMap[[string]$vCnt.SelectedItem])
+        $vArgs = @('voice-start', '--mode', $vModeMap[[string]$vMode.SelectedItem], '--hangover', (([string]$vHang.SelectedItem) -replace ' s', ''), '--content', $vCntMap[[string]$vCnt.SelectedItem])
+        $tr = $vTrMap[[string]$vTr.SelectedItem]
+        if ($tr -eq 'off') { $vArgs += '--no-transcribe' } else { $vArgs += @('--language', $tr) }
+        $r = Invoke-Cli $vArgs
         if (-not $r.ok) { [void][Windows.Forms.MessageBox]::Show("$($r.error)", 'Voice watch') }
     }
     $vBtn.Enabled = $true; $form.Cursor = 'Default'; Update-Voice
