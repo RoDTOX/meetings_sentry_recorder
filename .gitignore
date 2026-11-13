@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+*.exe
+*.mp4
+*.mkv
+*.m4a
+*.ts

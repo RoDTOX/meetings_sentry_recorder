@@ -1,0 +1,4 @@
+numpy
+pyaudiowpatch
+webrtcvad-wheels
+mcp>=1.9
